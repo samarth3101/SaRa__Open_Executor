@@ -1,0 +1,9 @@
+{
+  "name": "backend",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "python3 -m uvicorn app.main:app --reload --port 4000",
+    "start": "python3 -m uvicorn app.main:app --host 0.0.0.0 --port 4000"
+  }
+}
