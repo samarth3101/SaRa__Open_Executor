@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 from sqlalchemy import String, Integer, DateTime, ForeignKey, Text, Enum, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.session import Base
@@ -27,7 +28,7 @@ class Goal(Base):
     intent_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    user: Mapped["User"] = relationship("User", back_populates="goals")
+    user: Mapped[User] = relationship("User", back_populates="goals")
     milestones: Mapped[list["Milestone"]] = relationship("Milestone", back_populates="goal", cascade="all, delete-orphan")
     tasks: Mapped[list["Task"]] = relationship("Task", back_populates="goal", cascade="all, delete-orphan")
 
@@ -42,7 +43,7 @@ class Milestone(Base):
     order_index: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    goal: Mapped["Goal"] = relationship("Goal", back_populates="milestones")
+    goal: Mapped[Goal] = relationship("Goal", back_populates="milestones")
     tasks: Mapped[list["Task"]] = relationship("Task", back_populates="milestone")
 
 
@@ -60,7 +61,10 @@ class Task(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     goal: Mapped["Goal"] = relationship("Goal", back_populates="tasks")
-    milestone: Mapped["Milestone" | None] = relationship("Milestone", back_populates="tasks")
+    milestone: Mapped[Optional["Milestone"]] = relationship(
+        "Milestone",
+        back_populates="tasks"
+    )
     outgoing_dependencies: Mapped[list["TaskDependency"]] = relationship(
         "TaskDependency",
         foreign_keys="TaskDependency.task_id",
