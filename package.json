@@ -1,0 +1,12 @@
+{
+  "name": "sara-workspace-root",
+  "private": true,
+  "packageManager": "pnpm@10.12.4",
+  "scripts": {
+    "dev": "pnpm --dir SaRa dev",
+    "build": "pnpm --dir SaRa build",
+    "lint": "pnpm --dir SaRa lint",
+    "test": "pnpm --dir SaRa test",
+    "format": "pnpm --dir SaRa format"
+  }
+}
