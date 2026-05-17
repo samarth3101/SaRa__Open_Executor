@@ -1,17 +1,55 @@
 import { CommandResponse as CommandResponseType } from "../../utils/api";
 
 type Props = {
-  data: CommandResponseType | null;
+   data : CommandResponseType | null;
 };
 
 function getIntentLabel(intent?: CommandResponseType["intent"]) {
   switch (intent) {
-    case "news_summary":   return "News";
-    case "latest_emails":  return "Inbox";
-    case "today_remaining": return "Today";
-    case "goal_status":    return "Goals";
-    case "add_task":       return "Task";
-    default:               return "SaRa";
+    case "news_summary":
+      return "News";
+    case "latest_emails":
+      return "Inbox";
+    case "today_remaining":
+      return "Today";
+    case "goal_status":
+      return "Goals";
+    case "add_task":
+      return "Task";
+    default:
+      return "SaRa";
+  }
+}
+
+function getIntentEyebrow(intent?: CommandResponseType["intent"]) {
+  switch (intent) {
+    case "news_summary":
+      return "Current coverage";
+    case "latest_emails":
+      return "Inbox snapshot";
+    case "today_remaining":
+      return "Execution status";
+    case "goal_status":
+      return "Goal review";
+    case "add_task":
+      return "Task capture";
+    default:
+      return "Assistant response";
+  }
+}
+
+function getIntentEmptyState(intent?: CommandResponseType["intent"]) {
+  switch (intent) {
+    case "latest_emails":
+      return "No inbox items to highlight right now.";
+    case "news_summary":
+      return "No major stories were returned.";
+    case "goal_status":
+      return "No goals available yet.";
+    case "today_remaining":
+      return "Nothing urgent is pending right now.";
+    default:
+      return "Nothing important right now.";
   }
 }
 
@@ -22,25 +60,27 @@ export default function CommandResponse({ data }: Props) {
   const priorityItems = Array.isArray(data.priority_items)
     ? data.priority_items
     : [];
+
   const hasCards = cards.length > 0;
+  const intentLabel = getIntentLabel(data.intent);
+  const eyebrow = getIntentEyebrow(data.intent);
+  const emptyState = getIntentEmptyState(data.intent);
 
   return (
     <section className="sara-response-card">
-
-      {/* Response header */}
       <div className="sara-response-header">
         <div className="sara-response-meta">
           <div className="sara-intent-badge">
             <span className="sara-intent-dot" aria-hidden="true" />
-            {getIntentLabel(data.intent)}
+            {intentLabel}
           </div>
 
           <p className="sara-eyebrow" style={{ marginTop: "16px" }}>
-            SaRa response
+            {eyebrow}
           </p>
 
           <h2 className="sara-response-title">
-            {data.summary || "Here's the latest update."}
+            {data.summary || "Here’s the latest update."}
           </h2>
         </div>
 
@@ -60,11 +100,26 @@ export default function CommandResponse({ data }: Props) {
         </div>
       </div>
 
-      {/* Response body */}
       <div className="sara-response-body">
         {hasCards ? (
           <div className="sara-cards-grid">
             {cards.map((card, index) => {
+              const isNews = data.intent === "news_summary";
+              const isEmail = data.intent === "latest_emails";
+              const isGoals = data.intent === "goal_status";
+              const isToday = data.intent === "today_remaining";
+
+              const cardClassName = [
+                "sara-item-card",
+                card.url ? "sara-item-card--link" : "",
+                isNews ? "sara-item-card--news" : "",
+                isEmail ? "sara-item-card--email" : "",
+                isGoals ? "sara-item-card--goal" : "",
+                isToday ? "sara-item-card--today" : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
+
               const inner = (
                 <>
                   <div className="sara-card-item-top">
@@ -73,16 +128,27 @@ export default function CommandResponse({ data }: Props) {
                         <span className="sara-card-label">{card.label}</span>
                       )}
                       {card.subtitle && (
-                        <span className="sara-card-subtitle">{card.subtitle}</span>
+                        <span className="sara-card-subtitle">
+                          {card.subtitle}
+                        </span>
                       )}
                     </div>
-                    {card.url && (
+
+                    {card.url ? (
                       <span className="sara-open-pill">Open ↗</span>
-                    )}
+                    ) : isEmail ? (
+                      <span className="sara-open-pill">Inbox item</span>
+                    ) : isGoals ? (
+                      <span className="sara-open-pill">Goal</span>
+                    ) : isToday ? (
+                      <span className="sara-open-pill">Task</span>
+                    ) : null}
                   </div>
+
                   <h3 className="sara-card-item-title">
                     {card.title || "Untitled item"}
                   </h3>
+
                   {card.description && (
                     <p className="sara-card-item-desc">{card.description}</p>
                   )}
@@ -96,7 +162,7 @@ export default function CommandResponse({ data }: Props) {
                     href={card.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="sara-item-card sara-item-card--link"
+                    className={cardClassName}
                   >
                     {inner}
                   </a>
@@ -106,7 +172,7 @@ export default function CommandResponse({ data }: Props) {
               return (
                 <div
                   key={`${card.title ?? "card"}-${index}`}
-                  className="sara-item-card"
+                  className={cardClassName}
                 >
                   {inner}
                 </div>
@@ -116,13 +182,15 @@ export default function CommandResponse({ data }: Props) {
         ) : (
           <div className="sara-item-card">
             <p className="sara-eyebrow">Priority items</p>
+
             {priorityItems.length === 0 ? (
-              <p className="sara-empty-state">Nothing important right now.</p>
+              <p className="sara-empty-state">{emptyState}</p>
             ) : (
               <ul className="sara-priority-list">
                 {priorityItems.map((item, index) => (
                   <li key={index} className="sara-priority-item">
-                    {item}
+                    <span className="sara-priority-dot" aria-hidden="true" />
+                    <span>{item}</span>
                   </li>
                 ))}
               </ul>
@@ -130,9 +198,12 @@ export default function CommandResponse({ data }: Props) {
           </div>
         )}
 
-        {/* Suggested next action */}
         <div className="sara-suggestion">
-          <p className="sara-suggestion-label">Suggested next action</p>
+          <div className="sara-suggestion-top">
+            <p className="sara-suggestion-label">Suggested next action</p>
+            <span className="sara-suggestion-badge">{intentLabel}</span>
+          </div>
+
           <p className="sara-suggestion-text">
             {data.suggested_next_action || "Ask SaRa a follow-up question."}
           </p>

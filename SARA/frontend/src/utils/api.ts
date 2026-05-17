@@ -25,8 +25,20 @@ export type CommandResponse = {
   cards?: CommandCard[];
 };
 
+export type CommandHistoryItem = {
+  id: number;
+  user_id: number;
+  command_text: string;
+  intent: CommandIntent;
+  summary?: string | null;
+  source?: string | null;
+  created_at: string;
+};
+
+const API_BASE = "http://localhost:4000";
+
 export async function executeCommand(text: string) {
-  const res = await fetch("http://localhost:4000/commands/execute", {
+  const res = await fetch(`${API_BASE}/commands/execute`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -42,4 +54,20 @@ export async function executeCommand(text: string) {
   }
 
   return (await res.json()) as CommandResponse;
+}
+
+export async function getCommandHistory(userId = 1, limit = 100) {
+  const res = await fetch(
+    `${API_BASE}/commands/history/${userId}?limit=${limit}`,
+    {
+      method: "GET",
+      cache: "no-store",
+    }
+  );
+
+  if (!res.ok) {
+    throw new Error("Failed to fetch command history");
+  }
+
+  return (await res.json()) as CommandHistoryItem[];
 }

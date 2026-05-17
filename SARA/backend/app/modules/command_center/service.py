@@ -1,7 +1,9 @@
+from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 
 from app.modules.command_center.schemas import CommandResponse, CommandCard
-from app.db.models import Task, Goal, GmailToken
+from app.db.models import Task, Goal, GmailToken, CommandHistory
 from app.services.gmail_service import get_latest_emails
 from app.modules.news.service import get_news_summary
 from app.core.enums import GoalStatus, TaskStatus
@@ -44,8 +46,13 @@ def detect_intent(text: str) -> str:
         "current events",
     ]
     goal_keywords = [
-        "goal", "goals", "progress", "milestone",
-        "how am i doing", "overview", "status"
+        "goal",
+        "goals",
+        "progress",
+        "milestone",
+        "how am i doing",
+        "overview",
+        "status",
     ]
     add_keywords = ["add task", "create task", "new task", "add a task"]
 
@@ -61,6 +68,34 @@ def detect_intent(text: str) -> str:
         return "today_remaining"
 
     return "unknown"
+
+
+def create_command_history(
+    db: Session,
+    user_id: int,
+    command_text: str,
+    response: CommandResponse,
+) -> None:
+    history = CommandHistory(
+        user_id=user_id,
+        command_text=command_text,
+        intent=response.intent,
+        summary=response.summary,
+        source=response.source,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(history)
+    db.commit()
+
+
+def get_command_history_for_user(db: Session, user_id: int, limit: int = 20):
+    return (
+        db.query(CommandHistory)
+        .filter(CommandHistory.user_id == user_id)
+        .order_by(CommandHistory.created_at.desc())
+        .limit(limit)
+        .all()
+    )
 
 
 def handle_today_remaining(db: Session, user_id: int) -> CommandResponse:
@@ -82,14 +117,11 @@ def handle_today_remaining(db: Session, user_id: int) -> CommandResponse:
             cards=[],
         )
 
-    task_titles = [task.title for task in tasks[:5]]
-    priority_items = task_titles
-
     cards = [
         CommandCard(
             title=task.title,
-            subtitle=f"Status: {task.status}",
-            description=getattr(task, "description", None),
+            subtitle=f"Status: {task.status.value}",
+            description=task.description,
             label="Task",
         )
         for task in tasks[:5]
@@ -98,7 +130,7 @@ def handle_today_remaining(db: Session, user_id: int) -> CommandResponse:
     return CommandResponse(
         intent="today_remaining",
         summary=f"You have {len(tasks)} pending task(s).",
-        priority_items=priority_items,
+        priority_items=[task.title for task in tasks[:5]],
         suggested_next_action="start_highest_priority_task",
         source="database",
         estimated_minutes=2,
@@ -116,16 +148,15 @@ def handle_goal_status(db: Session, user_id: int) -> CommandResponse:
             priority_items=[],
             suggested_next_action="Add a goal to start tracking your progress.",
             source="local_db",
+            estimated_minutes=1,
             cards=[],
         )
-
-    goal_list = [f"{g.title} — {g.timeline}" for g in goals]
 
     cards = [
         CommandCard(
             title=g.title,
-            subtitle=f"Timeline: {g.timeline}",
-            description=getattr(g, "description", None),
+            subtitle=f"Timeline: {g.timeline or 'Not set'}",
+            description=g.description,
             label="Goal",
         )
         for g in goals[:5]
@@ -134,9 +165,10 @@ def handle_goal_status(db: Session, user_id: int) -> CommandResponse:
     return CommandResponse(
         intent="goal_status",
         summary=f"You have {len(goals)} active goal(s).",
-        priority_items=goal_list,
+        priority_items=[f"{g.title} — {g.timeline or 'No timeline'}" for g in goals[:5]],
         suggested_next_action="Review progress on the top goal",
         source="local_db",
+        estimated_minutes=2,
         cards=cards,
     )
 
@@ -148,6 +180,7 @@ def handle_add_task(text: str) -> CommandResponse:
         priority_items=["Use the task dashboard to add tasks for now."],
         suggested_next_action="Go to task dashboard and add your task manually.",
         source="system",
+        estimated_minutes=1,
         cards=[],
     )
 
@@ -179,11 +212,6 @@ def handle_latest_emails(db: Session, user_id: int) -> CommandResponse:
             cards=[],
         )
 
-    priority_items = [
-        f"{email['sender']} — {email['subject']}"
-        for email in emails[:5]
-    ]
-
     cards = [
         CommandCard(
             title=email["subject"],
@@ -194,7 +222,7 @@ def handle_latest_emails(db: Session, user_id: int) -> CommandResponse:
         for email in emails[:5]
     ]
 
-    joined = " ".join(f"{e['subject']} {e['preview']}".lower() for e in emails)
+    joined = " ".join(f"{e['subject']} {e.get('preview', '')}".lower() for e in emails)
     suggested_action = "review"
 
     if any(word in joined for word in ["urgent", "asap", "reply", "approval", "action required", "meeting", "invoice"]):
@@ -208,7 +236,7 @@ def handle_latest_emails(db: Session, user_id: int) -> CommandResponse:
     return CommandResponse(
         intent="latest_emails",
         summary=f"You have {len(emails)} recent inbox emails. Top senders: {senders}.",
-        priority_items=priority_items,
+        priority_items=[f"{email['sender']} — {email['subject']}" for email in emails[:5]],
         suggested_next_action=suggested_action,
         source="gmail",
         estimated_minutes=5,
@@ -218,11 +246,6 @@ def handle_latest_emails(db: Session, user_id: int) -> CommandResponse:
 
 def handle_news_summary(text: str) -> CommandResponse:
     result = get_news_summary(text)
-
-    article_lines = [
-        f"{article.source} — {article.title}"
-        for article in result.articles[:5]
-    ]
 
     cards = [
         CommandCard(
@@ -238,7 +261,7 @@ def handle_news_summary(text: str) -> CommandResponse:
     return CommandResponse(
         intent="news_summary",
         summary=result.summary,
-        priority_items=article_lines,
+        priority_items=[f"{article.source} — {article.title}" for article in result.articles[:5]],
         suggested_next_action=result.suggested_action,
         source=result.source,
         estimated_minutes=1,
@@ -258,6 +281,7 @@ def handle_unknown() -> CommandResponse:
         ],
         suggested_next_action="Use one of the supported command formats above.",
         source="system",
+        estimated_minutes=1,
         cards=[],
     )
 
@@ -279,4 +303,10 @@ def execute_command(db: Session, text: str, user_id: int) -> CommandResponse:
         response = handle_unknown()
 
     response.command_text = text
+    create_command_history(
+        db=db,
+        user_id=user_id,
+        command_text=text,
+        response=response,
+    )
     return response

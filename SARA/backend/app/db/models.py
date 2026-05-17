@@ -1,9 +1,12 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Enum, JSON
+
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.db.session import Base
 from app.core.enums import GoalStatus, TaskStatus, PriorityLevel
+
 
 class User(Base):
     __tablename__ = "users"
@@ -13,7 +16,16 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(120), unique=True, index=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    goals: Mapped[list["Goal"]] = relationship("Goal", back_populates="user", cascade="all, delete-orphan")
+    goals: Mapped[list["Goal"]] = relationship(
+        "Goal",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    command_history: Mapped[list["CommandHistory"]] = relationship(
+        "CommandHistory",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
 
 class Goal(Base):
@@ -28,9 +40,17 @@ class Goal(Base):
     intent_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    user: Mapped[User] = relationship("User", back_populates="goals")
-    milestones: Mapped[list["Milestone"]] = relationship("Milestone", back_populates="goal", cascade="all, delete-orphan")
-    tasks: Mapped[list["Task"]] = relationship("Task", back_populates="goal", cascade="all, delete-orphan")
+    user: Mapped["User"] = relationship("User", back_populates="goals")
+    milestones: Mapped[list["Milestone"]] = relationship(
+        "Milestone",
+        back_populates="goal",
+        cascade="all, delete-orphan",
+    )
+    tasks: Mapped[list["Task"]] = relationship(
+        "Task",
+        back_populates="goal",
+        cascade="all, delete-orphan",
+    )
 
 
 class Milestone(Base):
@@ -43,7 +63,7 @@ class Milestone(Base):
     order_index: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    goal: Mapped[Goal] = relationship("Goal", back_populates="milestones")
+    goal: Mapped["Goal"] = relationship("Goal", back_populates="milestones")
     tasks: Mapped[list["Task"]] = relationship("Task", back_populates="milestone")
 
 
@@ -63,7 +83,7 @@ class Task(Base):
     goal: Mapped["Goal"] = relationship("Goal", back_populates="tasks")
     milestone: Mapped[Optional["Milestone"]] = relationship(
         "Milestone",
-        back_populates="tasks"
+        back_populates="tasks",
     )
     outgoing_dependencies: Mapped[list["TaskDependency"]] = relationship(
         "TaskDependency",
@@ -86,19 +106,35 @@ class TaskDependency(Base):
     task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id"), nullable=False)
     depends_on_task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id"), nullable=False)
 
-    task: Mapped["Task"] = relationship("Task", foreign_keys=[task_id], back_populates="outgoing_dependencies")
-    depends_on_task: Mapped["Task"] = relationship("Task", foreign_keys=[depends_on_task_id], back_populates="incoming_dependencies")
+    task: Mapped["Task"] = relationship(
+        "Task",
+        foreign_keys=[task_id],
+        back_populates="outgoing_dependencies",
+    )
+    depends_on_task: Mapped["Task"] = relationship(
+        "Task",
+        foreign_keys=[depends_on_task_id],
+        back_populates="incoming_dependencies",
+    )
+
 
 class CommandHistory(Base):
     __tablename__ = "command_history"
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    command_text = Column(String, nullable=False)
-    intent = Column(String, nullable=False)
-    summary = Column(String, nullable=True)
-    source = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    command_text: Mapped[str] = mapped_column(Text, nullable=False)
+    intent: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        index=True,
+    )
+
+    user: Mapped["User"] = relationship("User", back_populates="command_history")
+
 
 class GmailToken(Base):
     __tablename__ = "gmail_tokens"
@@ -111,4 +147,8 @@ class GmailToken(Base):
     token_uri: Mapped[str] = mapped_column(String(255), default="https://oauth2.googleapis.com/token")
     scopes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
