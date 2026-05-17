@@ -1,9 +1,28 @@
+export type CommandIntent =
+  | "today_remaining"
+  | "latest_emails"
+  | "news_summary"
+  | "goal_status"
+  | "add_task"
+  | "unknown";
+
+export type CommandCard = {
+  title: string;
+  subtitle?: string | null;
+  description?: string | null;
+  url?: string | null;
+  label?: string | null;
+};
+
 export type CommandResponse = {
-  intent: "today_remaining" | "latest_emails" | "news_summary" | "unknown";
+  intent: CommandIntent;
   summary: string;
   priority_items: string[];
   suggested_next_action: string;
   source: string;
+  estimated_minutes?: number | null;
+  command_text?: string | null;
+  cards?: CommandCard[];
 };
 
 export async function executeCommand(text: string) {

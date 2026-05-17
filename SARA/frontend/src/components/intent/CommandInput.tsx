@@ -1,36 +1,94 @@
 "use client";
 
-import { useState } from "react";
+import { FormEvent, KeyboardEvent, useState } from "react";
 
 type Props = {
-  onSubmit: (value: string) => Promise<void>;
-  loading: boolean;
+  onSubmit: (value: string) => Promise<void> | void;
+  loading?: boolean;
 };
 
-export default function CommandInput({ onSubmit, loading }: Props) {
+export default function CommandInput({ onSubmit, loading = false }: Props) {
   const [value, setValue] = useState("");
 
-  async function handleSubmit(e: React.FormEvent) {
+  function submitCurrentValue() {
+    const trimmed = value.trim();
+    if (!trimmed || loading) return;
+    onSubmit(trimmed);
+    setValue("");
+  }
+
+  function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!value.trim()) return;
-    await onSubmit(value);
+    submitCurrentValue();
+  }
+
+  function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      submitCurrentValue();
+    }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="w-full space-y-3">
-      <textarea
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder='Try: "Hey SaRa, what is remaining today?"'
-        className="w-full rounded-xl border border-gray-300 p-4 text-sm outline-none focus:border-black min-h-[120px]"
-      />
-      <button
-        type="submit"
-        disabled={loading}
-        className="rounded-xl bg-black px-4 py-2 text-sm text-white disabled:opacity-50"
-      >
-        {loading ? "Thinking..." : "Ask SaRa"}
-      </button>
+    <form onSubmit={handleSubmit} className="sara-form">
+      <label htmlFor="command-input" className="sr-only">
+        Command input
+      </label>
+
+      <div className="sara-input-card">
+        {/* Textarea */}
+        <div className="sara-textarea-wrap">
+          <textarea
+            id="command-input"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            rows={4}
+            placeholder='Try: "Hey SaRa, what is remaining today?"'
+            className="sara-textarea"
+          />
+
+          {/* Send button — icon in box, bottom-right of textarea */}
+          <button
+            type="submit"
+            disabled={loading || !value.trim()}
+            aria-label="Send command"
+            className="sara-send-btn"
+          >
+            {loading ? (
+              <span className="sara-send-spinner" aria-hidden="true" />
+            ) : (
+              /* Arrow-up-right icon drawn with two SVG lines */
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 18 18"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M4.5 13.5L13.5 4.5M13.5 4.5H6.75M13.5 4.5V11.25"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            )}
+          </button>
+        </div>
+
+        {/* Footer hints */}
+        <div className="sara-input-footer">
+          <span className="sara-input-hint">
+            Press <kbd className="sara-kbd">Enter</kbd> to send,{" "}
+            <kbd className="sara-kbd">Shift + Enter</kbd> for a new line.
+          </span>
+          <span className="sara-input-hint sara-input-hint--muted">
+            Natural language works best.
+          </span>
+        </div>
+      </div>
     </form>
   );
 }
