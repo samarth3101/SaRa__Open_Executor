@@ -2,12 +2,14 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 from app.core.enums import GoalStatus
 
+
 class GoalCreate(BaseModel):
     user_id: int
     title: str
     description: str | None = None
     timeline: str | None = None
     intent_payload: dict | None = None
+
 
 class GoalRead(BaseModel):
     id: int

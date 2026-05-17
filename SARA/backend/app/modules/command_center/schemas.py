@@ -6,6 +6,7 @@ CommandIntent = Literal[
     "latest_emails",
     "news_summary",
     "goal_status",
+    "add_goal",
     "add_task",
     "unknown",
 ]

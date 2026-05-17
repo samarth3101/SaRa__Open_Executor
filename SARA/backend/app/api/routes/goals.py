@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+
 from app.db.session import get_db
 from app.db.models import Goal, User
 from app.schemas.goal import GoalCreate, GoalRead
 
 router = APIRouter(prefix="/goals", tags=["Goals"])
+
 
 @router.post("/", response_model=GoalRead)
 def create_goal(payload: GoalCreate, db: Session = Depends(get_db)):
@@ -23,6 +25,7 @@ def create_goal(payload: GoalCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(goal)
     return goal
+
 
 @router.get("/", response_model=list[GoalRead])
 def list_goals(db: Session = Depends(get_db)):

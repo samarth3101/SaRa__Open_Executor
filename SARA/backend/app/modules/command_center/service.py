@@ -1,12 +1,11 @@
-from datetime import datetime, timezone
-
+import re
 from sqlalchemy.orm import Session
 
 from app.modules.command_center.schemas import CommandResponse, CommandCard
-from app.db.models import Task, Goal, GmailToken, CommandHistory
+from app.db.models import Task, Goal, GmailToken, CommandHistory, User
 from app.services.gmail_service import get_latest_emails
 from app.modules.news.service import get_news_summary
-from app.core.enums import GoalStatus, TaskStatus
+from app.core.enums import GoalStatus, TaskStatus, PriorityLevel
 
 
 def detect_intent(text: str) -> str:
@@ -54,9 +53,22 @@ def detect_intent(text: str) -> str:
         "overview",
         "status",
     ]
-    add_keywords = ["add task", "create task", "new task", "add a task"]
+    add_goal_keywords = [
+        "add goal",
+        "create goal",
+        "new goal",
+        "set goal",
+    ]
+    add_task_keywords = [
+        "add task",
+        "create task",
+        "new task",
+        "add a task",
+    ]
 
-    if any(w in value for w in add_keywords):
+    if any(w in value for w in add_goal_keywords):
+        return "add_goal"
+    if any(w in value for w in add_task_keywords):
         return "add_task"
     if any(w in value for w in email_keywords):
         return "latest_emails"
@@ -82,13 +94,12 @@ def create_command_history(
         intent=response.intent,
         summary=response.summary,
         source=response.source,
-        created_at=datetime.now(timezone.utc),
     )
     db.add(history)
     db.commit()
 
 
-def get_command_history_for_user(db: Session, user_id: int, limit: int = 20):
+def get_command_history_for_user(db: Session, user_id: int, limit: int = 100):
     return (
         db.query(CommandHistory)
         .filter(CommandHistory.user_id == user_id)
@@ -98,10 +109,110 @@ def get_command_history_for_user(db: Session, user_id: int, limit: int = 20):
     )
 
 
+def extract_task_title(text: str) -> str:
+    cleaned = text.strip()
+
+    patterns = [
+        r"^(add task)\s+",
+        r"^(create task)\s+",
+        r"^(new task)\s+",
+        r"^(add a task)\s+",
+    ]
+
+    lowered = cleaned.lower()
+    for pattern in patterns:
+        match = re.match(pattern, lowered)
+        if match:
+            cleaned = cleaned[len(match.group(0)):].strip()
+            break
+
+    cleaned = cleaned.strip(" .:-")
+    return cleaned
+
+
+def extract_goal_title(text: str) -> str:
+    cleaned = text.strip()
+
+    patterns = [
+        r"^(add goal)\s+",
+        r"^(create goal)\s+",
+        r"^(new goal)\s+",
+        r"^(set goal)\s+",
+    ]
+
+    lowered = cleaned.lower()
+    for pattern in patterns:
+        match = re.match(pattern, lowered)
+        if match:
+            cleaned = cleaned[len(match.group(0)):].strip()
+            break
+
+    cleaned = cleaned.strip(" .:-")
+    return cleaned
+
+
+def infer_priority(text: str) -> PriorityLevel:
+    lowered = text.lower()
+
+    if any(word in lowered for word in ["urgent", "high priority", "important", "asap"]):
+        return PriorityLevel.high
+    if any(word in lowered for word in ["low priority", "later", "whenever"]):
+        return PriorityLevel.low
+    return PriorityLevel.medium
+
+
+def infer_estimated_minutes(text: str) -> int | None:
+    lowered = text.lower()
+
+    minute_match = re.search(r"(\d+)\s*(min|mins|minute|minutes)\b", lowered)
+    if minute_match:
+        return int(minute_match.group(1))
+
+    hour_match = re.search(r"(\d+)\s*(hr|hrs|hour|hours)\b", lowered)
+    if hour_match:
+        return int(hour_match.group(1)) * 60
+
+    return None
+
+
+def infer_goal_timeline(text: str) -> str | None:
+    lowered = text.lower()
+
+    if any(word in lowered for word in ["today", "tonight"]):
+        return "Today"
+    if "this week" in lowered:
+        return "This week"
+    if "this month" in lowered:
+        return "This month"
+    if any(word in lowered for word in ["quarter", "q1", "q2", "q3", "q4"]):
+        return "This quarter"
+
+    return None
+
+
+def get_default_goal_for_user(db: Session, user_id: int) -> Goal | None:
+    return (
+        db.query(Goal)
+        .filter(Goal.user_id == user_id, Goal.status == GoalStatus.active)
+        .order_by(Goal.created_at.desc())
+        .first()
+    )
+
+
+def get_any_goal_for_user(db: Session, user_id: int) -> Goal | None:
+    return (
+        db.query(Goal)
+        .filter(Goal.user_id == user_id)
+        .order_by(Goal.created_at.desc())
+        .first()
+    )
+
+
 def handle_today_remaining(db: Session, user_id: int) -> CommandResponse:
     tasks = (
         db.query(Task)
-        .filter(Task.status != TaskStatus.completed)
+        .join(Goal, Goal.id == Task.goal_id)
+        .filter(Goal.user_id == user_id, Task.status != TaskStatus.completed)
         .order_by(Task.created_at.desc())
         .all()
     )
@@ -139,14 +250,45 @@ def handle_today_remaining(db: Session, user_id: int) -> CommandResponse:
 
 
 def handle_goal_status(db: Session, user_id: int) -> CommandResponse:
-    goals = db.query(Goal).filter(Goal.status == GoalStatus.active).all()
+    goals = (
+        db.query(Goal)
+        .filter(Goal.user_id == user_id, Goal.status == GoalStatus.active)
+        .order_by(Goal.created_at.desc())
+        .all()
+    )
 
     if not goals:
+        fallback_goal = get_any_goal_for_user(db, user_id)
+
+        if fallback_goal:
+            return CommandResponse(
+                intent="goal_status",
+                summary="No active goals found, but SaRa found an older goal in your workspace.",
+                priority_items=[
+                    fallback_goal.title,
+                    fallback_goal.timeline or "No timeline set",
+                ],
+                suggested_next_action="Reactivate or review your latest goal.",
+                source="local_db",
+                estimated_minutes=1,
+                cards=[
+                    CommandCard(
+                        title=fallback_goal.title,
+                        subtitle=f"Timeline: {fallback_goal.timeline or 'Not set'}",
+                        description=fallback_goal.description,
+                        label="Existing goal",
+                    )
+                ],
+            )
+
         return CommandResponse(
             intent="goal_status",
-            summary="No active goals found.",
-            priority_items=[],
-            suggested_next_action="Add a goal to start tracking your progress.",
+            summary="No goals found yet.",
+            priority_items=[
+                "Create your first goal",
+                "Then add tasks under it",
+            ],
+            suggested_next_action="Create a goal to start tracking your progress.",
             source="local_db",
             estimated_minutes=1,
             cards=[],
@@ -166,22 +308,169 @@ def handle_goal_status(db: Session, user_id: int) -> CommandResponse:
         intent="goal_status",
         summary=f"You have {len(goals)} active goal(s).",
         priority_items=[f"{g.title} — {g.timeline or 'No timeline'}" for g in goals[:5]],
-        suggested_next_action="Review progress on the top goal",
+        suggested_next_action="Review progress on the top goal.",
         source="local_db",
         estimated_minutes=2,
         cards=cards,
     )
 
 
-def handle_add_task(text: str) -> CommandResponse:
+def handle_add_goal(db: Session, user_id: int, text: str) -> CommandResponse:
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return CommandResponse(
+            intent="add_goal",
+            summary="SaRa could not create a goal because the user was not found.",
+            priority_items=[],
+            suggested_next_action="Create or load a valid user first.",
+            source="system",
+            estimated_minutes=1,
+            cards=[],
+        )
+
+    title = extract_goal_title(text)
+    if not title:
+        return CommandResponse(
+            intent="add_goal",
+            summary="SaRa needs a goal title before creating a goal.",
+            priority_items=[
+                "Try: create goal ship SaRa MVP",
+                "Try: add goal finish frontend polish this week",
+            ],
+            suggested_next_action="Rewrite the command with a clear goal title.",
+            source="system",
+            estimated_minutes=1,
+            cards=[],
+        )
+
+    goal = Goal(
+        user_id=user_id,
+        title=title,
+        description=f"Created from command: {text}",
+        timeline=infer_goal_timeline(text),
+        status=GoalStatus.active,
+        intent_payload={"source_command": text},
+    )
+
+    db.add(goal)
+    db.commit()
+    db.refresh(goal)
+
+    subtitle_parts = [
+        f"Status: {goal.status.value}",
+        f"Timeline: {goal.timeline or 'Not set'}",
+    ]
+
+    return CommandResponse(
+        intent="add_goal",
+        summary=f'Goal "{goal.title}" was created successfully.',
+        priority_items=[
+            goal.title,
+            f"Timeline: {goal.timeline or 'Not set'}",
+        ],
+        suggested_next_action="Now add a task under this goal.",
+        source="database",
+        estimated_minutes=1,
+        cards=[
+            CommandCard(
+                title=goal.title,
+                subtitle=" · ".join(subtitle_parts),
+                description=goal.description,
+                label="Goal created",
+            )
+        ],
+    )
+
+
+def handle_add_task(db: Session, user_id: int, text: str) -> CommandResponse:
+    title = extract_task_title(text)
+    if not title:
+        return CommandResponse(
+            intent="add_task",
+            summary="SaRa needs a task title before creating a task.",
+            priority_items=[
+                "Try: add task review landing page copy",
+                "Try: create task fix gmail sync bug",
+            ],
+            suggested_next_action="Rewrite the command with a clear task title.",
+            source="system",
+            estimated_minutes=1,
+            cards=[],
+        )
+
+    goal = get_default_goal_for_user(db, user_id)
+    used_fallback_goal = False
+
+    if not goal:
+        goal = get_any_goal_for_user(db, user_id)
+        used_fallback_goal = goal is not None
+
+    if not goal:
+        return CommandResponse(
+            intent="add_task",
+            summary=f'SaRa understood the task "{title}", but there is no goal available to attach it to yet.',
+            priority_items=[
+                f"Pending task request: {title}",
+                "Create one goal first so SaRa can organize tasks properly.",
+            ],
+            suggested_next_action="Create a goal, then run the same add task command again.",
+            source="system",
+            estimated_minutes=1,
+            cards=[
+                CommandCard(
+                    title=title,
+                    subtitle="Task draft",
+                    description="No goal exists yet, so SaRa could not save this task.",
+                    label="Needs goal",
+                )
+            ],
+        )
+
+    task = Task(
+        goal_id=goal.id,
+        milestone_id=None,
+        title=title,
+        description=f"Created from command: {text}",
+        priority=infer_priority(text),
+        status=TaskStatus.pending,
+        estimated_minutes=infer_estimated_minutes(text),
+    )
+
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    subtitle_parts = [
+        f"Goal: {goal.title}",
+        f"Priority: {task.priority.value}",
+    ]
+    if task.estimated_minutes:
+        subtitle_parts.append(f"Estimate: {task.estimated_minutes} min")
+    if used_fallback_goal:
+        subtitle_parts.append("Attached using fallback goal")
+
+    priority_items = [
+        f"{task.title} — {task.priority.value} priority",
+        f"Attached to goal: {goal.title}",
+    ]
+    if used_fallback_goal:
+        priority_items.append("No active goal was found, so SaRa used your most recent goal.")
+
     return CommandResponse(
         intent="add_task",
-        summary="Task creation via command is coming soon.",
-        priority_items=["Use the task dashboard to add tasks for now."],
-        suggested_next_action="Go to task dashboard and add your task manually.",
-        source="system",
+        summary=f'Task "{task.title}" was added successfully.',
+        priority_items=priority_items,
+        suggested_next_action="Review today_remaining to see the updated task queue.",
+        source="database",
         estimated_minutes=1,
-        cards=[],
+        cards=[
+            CommandCard(
+                title=task.title,
+                subtitle=" · ".join(subtitle_parts),
+                description=task.description,
+                label="Task created",
+            )
+        ],
     )
 
 
@@ -225,7 +514,10 @@ def handle_latest_emails(db: Session, user_id: int) -> CommandResponse:
     joined = " ".join(f"{e['subject']} {e.get('preview', '')}".lower() for e in emails)
     suggested_action = "review"
 
-    if any(word in joined for word in ["urgent", "asap", "reply", "approval", "action required", "meeting", "invoice"]):
+    if any(
+        word in joined
+        for word in ["urgent", "asap", "reply", "approval", "action required", "meeting", "invoice"]
+    ):
         suggested_action = "reply"
 
     senders = ", ".join(
@@ -276,6 +568,8 @@ def handle_unknown() -> CommandResponse:
         priority_items=[
             "Try: what's remaining today",
             "Try: check my goals",
+            "Try: create goal ship SaRa MVP",
+            "Try: add task review landing page copy",
             "Try: check latest emails",
             "Try: latest geopolitics news",
         ],
@@ -293,8 +587,10 @@ def execute_command(db: Session, text: str, user_id: int) -> CommandResponse:
         response = handle_today_remaining(db, user_id)
     elif intent == "goal_status":
         response = handle_goal_status(db, user_id)
+    elif intent == "add_goal":
+        response = handle_add_goal(db, user_id, text)
     elif intent == "add_task":
-        response = handle_add_task(text)
+        response = handle_add_task(db, user_id, text)
     elif intent == "latest_emails":
         response = handle_latest_emails(db, user_id)
     elif intent == "news_summary":
