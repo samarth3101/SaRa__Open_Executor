@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, useState } from "react";
+import "./CommandInput.module.css";
 
 type Props = {
   onSubmit: (value: string) => Promise<void> | void;

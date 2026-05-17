@@ -1,3 +1,5 @@
+import "./CommandResponse.module.css";
+
 import { CommandResponse as CommandResponseType } from "../../utils/api";
 
 type Props = {

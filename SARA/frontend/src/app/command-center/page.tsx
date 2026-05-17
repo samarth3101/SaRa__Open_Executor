@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import CommandInput from "../../components/intent/CommandInput";
 import CommandResponse from "../../components/intent/CommandResponse";
+import "./page.module.css";
 import {
   CommandHistoryItem,
   CommandResponse as CommandResponseType,
