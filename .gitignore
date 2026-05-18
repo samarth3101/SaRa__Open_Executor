@@ -1,3 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
 .env
-.env.local
-.env.*
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Node
+node_modules/
+
+# Logs
+*.log
+
+# Mac
+.DS_Store
+
+# Build
+.next/
+dist/
+build/
